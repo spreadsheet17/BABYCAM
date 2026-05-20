@@ -1,0 +1,12 @@
+python -m venv .venv
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+pip install -r .\requirements.txt
+
+run the server:
+change the rtsp credentials and IP. pick between the two, train-5 is the latest, train-4 is a pretty stable version.
+
+python server.py --classifier .\dataset\runs\classify\train-5\weights\best.pt --detector yolov8n.pt --conf 0.40 --cls-conf 0.50 --rtsp rtsp://autofister17:potatoes17@192.168.1.3:554/stream1
+
+OR TRAIN-4 weights
+
+python server.py --classifier .\dataset\runs\classify\train-4\weights\best.pt --detector yolov8n.pt --conf 0.40 --cls-conf 0.50 --rtsp rtsp://autofister17:potatoes17@192.168.1.3:554/stream1
