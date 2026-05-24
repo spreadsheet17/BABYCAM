@@ -12,8 +12,17 @@ from typing import Optional
 
 import cv2
 import numpy as np
-from flask import Flask, Response, jsonify
+from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
+from flask_jwt_extended import (
+    JWTManager, create_access_token,
+    jwt_required, get_jwt_identity,
+)
+
+# ── Hardcoded credentials ─────────────────────────────────────────────────────
+_USER_EMAIL    = "example1@gmail.com"
+_USER_PASSWORD = "babycam1"
+_JWT_SECRET    = "babycam-super-secret-key-2024"
 
 from capture import RTSPCapture
 from position_analyzer import PositionAnalyzer, PositionResult, SleepPosition
@@ -41,6 +50,9 @@ args, _ = parser.parse_known_args()
 # ── Flask ─────────────────────────────────────────────────────────────────────
 app = Flask(__name__)
 CORS(app)
+app.config["JWT_SECRET_KEY"]        = _JWT_SECRET
+app.config["JWT_ACCESS_TOKEN_EXPIRES"] = False   # tokens don't expire
+jwt = JWTManager(app)
 
 # ── Shared state ──────────────────────────────────────────────────────────────
 _lock  = threading.Lock()
@@ -159,7 +171,19 @@ def _mjpeg_generator():
         time.sleep(0.033)
 
 
+@app.route("/login", methods=["POST"])
+def login():
+    body = request.get_json(silent=True) or {}
+    email    = body.get("email", "").strip().lower()
+    password = body.get("password", "")
+    if email == _USER_EMAIL and password == _USER_PASSWORD:
+        token = create_access_token(identity=email)
+        return jsonify({"token": token})
+    return jsonify({"error": "Invalid email or password"}), 401
+
+
 @app.route("/stream")
+@jwt_required()
 def stream():
     return Response(
         _mjpeg_generator(),
@@ -167,6 +191,7 @@ def stream():
     )
 
 @app.route("/status")
+@jwt_required()
 def status():
     with _lock:
         return jsonify(dict(_state))

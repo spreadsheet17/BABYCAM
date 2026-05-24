@@ -24,7 +24,8 @@ const DEFAULT_CONFIG = {
   rtspPort:    "554",
   rtspPath:    "stream1",
 };
-const STORAGE_KEY = "@babycam_config";
+const STORAGE_KEY  = "@babycam_config";
+const TOKEN_KEY    = "@babycam_token";
 
 function buildBaseUrl(cfg) {
   return `http://${cfg.serverIp}:${cfg.serverPort}`;
@@ -292,7 +293,7 @@ function AlertModeSelector({ value, onChange }) {
   );
 }
 
-function SettingsTab({ alertMode, setAlertMode, config, onSaveConfig }) {
+function SettingsTab({ alertMode, setAlertMode, config, onSaveConfig, onLogout }) {
   const [draft, setDraft] = useState({ ...config });
   const [saved, setSaved] = useState(false);
 
@@ -371,6 +372,144 @@ function SettingsTab({ alertMode, setAlertMode, config, onSaveConfig }) {
           </Text>
         </View>
       ))}
+
+      <TouchableOpacity
+        style={[styles.saveBtn, { backgroundColor: "#450a0a", marginTop: 16 }]}
+        onPress={onLogout}
+      >
+        <Text style={[styles.saveBtnTxt, { color: "#f87171" }]}>Sign Out</Text>
+      </TouchableOpacity>
+    </KeyboardAvoidingView>
+  );
+}
+
+// ── Login screen ─────────────────────────────────────────────────────────────
+function LoginScreen({ onLogin, config, onUpdateServerConfig }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [serverIp, setServerIp] = useState(config.serverIp);
+  const [serverPort, setServerPort] = useState(config.serverPort);
+  const [error,    setError]    = useState("");
+  const [loading,  setLoading]  = useState(false);
+
+  async function handleLogin() {
+    if (!username.trim() || !password.trim()) {
+      setError("Please enter your email and password.");
+      return;
+    }
+    if (!serverIp.trim() || !serverPort.trim()) {
+      setError("Please enter the server IP and port.");
+      return;
+    }
+    setError("");
+    setLoading(true);
+    try {
+      const baseUrl  = `http://${serverIp.trim()}:${serverPort.trim()}`;
+      const res      = await fetch(`${baseUrl}/login`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ email: username.trim().toLowerCase(), password }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Login failed. Please try again.");
+        return;
+      }
+      await AsyncStorage.setItem(TOKEN_KEY, data.token);
+      onUpdateServerConfig(serverIp.trim(), serverPort.trim());
+      onLogin(data.token);
+    } catch (e) {
+      setError("Could not reach server. Check IP, port, and connection.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <KeyboardAvoidingView
+      style={styles.loginRoot}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    >
+      <ScrollView contentContainerStyle={styles.loginInner} keyboardShouldPersistTaps="handled">
+        <Text style={styles.loginLogo}>👶</Text>
+        <Text style={styles.loginTitle}>BabyCam</Text>
+        <Text style={styles.loginSub}>Sleep Safety Monitor</Text>
+
+        <View style={styles.loginCard}>
+
+          <Text style={styles.loginSectionLabel}>Server</Text>
+          <View style={styles.loginRow}>
+            <View style={{ flex: 3, marginRight: 8 }}>
+              <Text style={styles.loginLabel}>IP Address</Text>
+              <TextInput
+                style={styles.loginInput}
+                value={serverIp}
+                onChangeText={v => { setServerIp(v); setError(""); }}
+                placeholder="192.168.1.9"
+                placeholderTextColor="#475569"
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="numeric"
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.loginLabel}>Port</Text>
+              <TextInput
+                style={styles.loginInput}
+                value={serverPort}
+                onChangeText={v => { setServerPort(v); setError(""); }}
+                placeholder="5000"
+                placeholderTextColor="#475569"
+                keyboardType="numeric"
+              />
+            </View>
+          </View>
+
+          <View style={styles.loginDivider} />
+
+          <Text style={styles.loginSectionLabel}>Account</Text>
+          <Text style={styles.loginLabel}>Email</Text>
+          <TextInput
+            style={styles.loginInput}
+            value={username}
+            onChangeText={v => { setUsername(v); setError(""); }}
+            placeholder="Enter email"
+            placeholderTextColor="#475569"
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="email-address"
+          />
+
+          <Text style={[styles.loginLabel, { marginTop: 14 }]}>Password</Text>
+          <TextInput
+            style={styles.loginInput}
+            value={password}
+            onChangeText={v => { setPassword(v); setError(""); }}
+            placeholder="Enter password"
+            placeholderTextColor="#475569"
+            secureTextEntry
+            autoCapitalize="none"
+          />
+
+          {error ? (
+            <Text style={styles.loginError}>{error}</Text>
+          ) : null}
+
+          <TouchableOpacity
+            style={[styles.loginBtn, loading && { opacity: 0.6 }]}
+            onPress={handleLogin}
+            disabled={loading}
+          >
+            <Text style={styles.loginBtnTxt}>
+              {loading ? "Signing in…" : "Sign In"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <Text style={styles.loginFooter}>
+          BabyCam v1.0 · Secure Monitor
+        </Text>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
@@ -405,6 +544,8 @@ function TabBar({ active, onChange, badgeCount }) {
 
 // ── Root ──────────────────────────────────────────────────────────────────────
 function Main() {
+  const [loggedIn,   setLoggedIn]   = useState(false);
+  const [token,      setToken]      = useState(null);
   const [tab,        setTab]        = useState("monitor");
   const [status,     setStatus]     = useState({ position: "NO_BABY", confidence: 0, fps: 0, alert_count: 0, reason: "", keypoints_used: false });
   const [connected,  setConnected]  = useState(false);
@@ -422,6 +563,10 @@ function Main() {
     setupNotificationChannel();
     requestNotifPermission().then(setGranted);
 
+    AsyncStorage.getItem(TOKEN_KEY).then(tok => {
+      if (tok) { setToken(tok); setLoggedIn(true); }
+    });
+
     AsyncStorage.getItem(STORAGE_KEY).then(raw => {
       if (raw) {
         try {
@@ -433,6 +578,19 @@ function Main() {
     });
   }, []);
 
+  async function handleLogout() {
+    await AsyncStorage.removeItem(TOKEN_KEY);
+    setToken(null);
+    setLoggedIn(false);
+  }
+
+  function handleUpdateServerConfig(ip, port) {
+    const updated = { ...configRef.current, serverIp: ip, serverPort: port };
+    setConfig(updated);
+    configRef.current = updated;
+    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+  }
+
   async function handleSaveConfig(draft) {
     const merged = { ...DEFAULT_CONFIG, ...draft };
     setConfig(merged);
@@ -440,13 +598,24 @@ function Main() {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
   }
 
+  const tokenRef = useRef(token);
+  useEffect(() => { tokenRef.current = token; }, [token]);
+
   const poll = useCallback(async () => {
     const baseUrl = buildBaseUrl(configRef.current);
     try {
       const controller = new AbortController();
       const timeout    = setTimeout(() => controller.abort(), 3000);
-      const res        = await fetch(`${baseUrl}/status`, { signal: controller.signal });
+      const res        = await fetch(`${baseUrl}/status`, {
+        signal:  controller.signal,
+        headers: { Authorization: `Bearer ${tokenRef.current}` },
+      });
       clearTimeout(timeout);
+      if (res.status === 401) {
+        await AsyncStorage.removeItem(TOKEN_KEY);
+        setLoggedIn(false);
+        return;
+      }
       const data = await res.json();
       setStatus(data);
       setConnected(true);
@@ -481,7 +650,7 @@ function Main() {
   const cfg    = POS[status.position] ?? POS.UNKNOWN;
   const unsafe = !cfg.safe && status.position !== "NO_BABY";
 
-  return (
+  return loggedIn ? (
     <SafeAreaView style={styles.root} edges={["top"]}>
       <StatusBar barStyle="light-content" backgroundColor="#080810" />
 
@@ -505,12 +674,14 @@ function Main() {
         <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
           {tab === "monitor"  && <MonitorTab status={status} connected={connected} />}
           {tab === "alerts"   && <AlertsTab alerts={alerts} onClear={() => setAlerts([])} />}
-          {tab === "settings" && <SettingsTab alertMode={alertMode} setAlertMode={setAlertMode} config={config} onSaveConfig={handleSaveConfig} />}
+          {tab === "settings" && <SettingsTab alertMode={alertMode} setAlertMode={setAlertMode} config={config} onSaveConfig={handleSaveConfig} onLogout={handleLogout} />}
         </ScrollView>
       )}
 
       <TabBar active={tab} onChange={setTab} badgeCount={alerts.length} />
     </SafeAreaView>
+  ) : (
+    <LoginScreen onLogin={(tok) => { setToken(tok); setLoggedIn(true); }} config={config} onUpdateServerConfig={handleUpdateServerConfig} />
   );
 }
 
@@ -606,4 +777,20 @@ const styles = StyleSheet.create({
   badgeTxt:       { color: "#fff", fontSize: 9, fontWeight: "800" },
 
   secTitle:       { fontSize: 12, fontWeight: "700", color: C.sub, letterSpacing: 1, textTransform: "uppercase", marginBottom: 10 },
+
+  loginRoot:      { flex: 1, backgroundColor: C.dark },
+  loginInner:     { flexGrow: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 28, paddingVertical: 40 },
+  loginLogo:      { fontSize: 64, marginBottom: 10 },
+  loginTitle:     { fontSize: 32, fontWeight: "900", color: C.text, letterSpacing: 1 },
+  loginSub:       { fontSize: 13, color: C.muted, marginBottom: 36 },
+  loginCard:      { width: "100%", backgroundColor: "#0f172a", borderRadius: 20, borderWidth: 1, borderColor: "#1e293b", padding: 24 },
+  loginLabel:     { fontSize: 11, color: C.sub, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 },
+  loginInput:     { backgroundColor: "#0a0a14", borderWidth: 1.5, borderColor: "#1e293b", borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, color: C.text, fontSize: 15, fontFamily: Platform.OS === "android" ? "monospace" : "Courier" },
+  loginError:     { color: "#f87171", fontSize: 12, marginTop: 10, textAlign: "center" },
+  loginBtn:       { backgroundColor: "#1d4ed8", borderRadius: 12, paddingVertical: 15, alignItems: "center", marginTop: 22 },
+  loginBtnTxt:    { color: "#fff", fontWeight: "800", fontSize: 16, letterSpacing: 0.5 },
+  loginFooter:    { fontSize: 11, color: "#334155", marginTop: 32 },
+  loginSectionLabel: { fontSize: 10, color: "#334155", fontWeight: "700", letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 10 },
+  loginRow:       { flexDirection: "row", alignItems: "flex-end" },
+  loginDivider:   { height: 1, backgroundColor: "#1e293b", marginVertical: 18 },
 });
