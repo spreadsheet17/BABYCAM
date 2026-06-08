@@ -230,7 +230,21 @@ class PositionAnalyzer:
             if r.boxes is None:
                 continue
             for box in r.boxes:
+                # ── Gate 1: person class only (COCO class 0) ──────────────
+                if int(box.cls[0].item()) != 0:
+                    logger.debug("Skipping non-person detection (class %d)", int(box.cls[0].item()))
+                    continue
+
                 x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+
+                # ── Gate 2: aspect ratio — babies lie down, bbox should be
+                #    wider than tall (or roughly square).  A standing adult
+                #    produces a very tall narrow box (w/h < 0.4).
+                bw, bh = x2 - x1, y2 - y1
+                aspect = bw / bh if bh > 0 else 0
+                if aspect < 0.35:
+                    logger.debug("Skipping upright-person bbox (aspect=%.2f)", aspect)
+                    continue
 
                 # expand bbox slightly so the classifier sees some context
                 pad_x = int((x2 - x1) * self.CROP_PADDING)
